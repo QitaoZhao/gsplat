@@ -307,7 +307,8 @@ inline __device__ void persp_proj_vjp(
     const vec2<T> v_mean2d,
     // grad inputs
     vec3<T> &v_mean3d,
-    mat3<T> &v_cov3d
+    mat3<T> &v_cov3d,
+    mat3<T> &v_K
 ) {
     T x = mean3d[0], y = mean3d[1], z = mean3d[2];
 
@@ -347,6 +348,12 @@ inline __device__ void persp_proj_vjp(
         -(fx * x * v_mean2d[0] + fy * y * v_mean2d[1]) * rz2
     );
 
+    // === Grad wrt intrinsics from projected means ===
+    v_K[0][0] += x * rz * v_mean2d[0];         // dL/dfx from x
+    v_K[1][1] += y * rz * v_mean2d[1];         // dL/dfy from y
+    v_K[2][0] += v_mean2d[0];                  // dL/dcx
+    v_K[2][1] += v_mean2d[1];                  // dL/dcy
+
     // df/dx = -fx * rz2 * df/dJ_02
     // df/dy = -fy * rz2 * df/dJ_12
     // df/dz = -fx * rz2 * df/dJ_00 - fy * rz2 * df/dJ_11
@@ -358,17 +365,24 @@ inline __device__ void persp_proj_vjp(
     // fov clipping
     if (x * rz <= lim_x_pos && x * rz >= -lim_x_neg) {
         v_mean3d.x += -fx * rz2 * v_J[2][0];
+        v_K[0][0] -= tx * rz2 * v_J[2][0];
     } else {
         v_mean3d.z += -fx * rz3 * v_J[2][0] * tx;
+        v_K[2][0] += rz * v_J[2][0];
     }
     if (y * rz <= lim_y_pos && y * rz >= -lim_y_neg) {
         v_mean3d.y += -fy * rz2 * v_J[2][1];
+        v_K[1][1] -= ty * rz2 * v_J[2][1];
     } else {
         v_mean3d.z += -fy * rz3 * v_J[2][1] * ty;
+        v_K[2][1] += rz * v_J[2][1];
     }
     v_mean3d.z += -fx * rz2 * v_J[0][0] - fy * rz2 * v_J[1][1] +
                   2.f * fx * tx * rz3 * v_J[2][0] +
                   2.f * fy * ty * rz3 * v_J[2][1];
+
+    v_K[0][0] += rz * v_J[0][0];  // fx
+    v_K[1][1] += rz * v_J[1][1];  // fy
 }
 
 template <typename T>

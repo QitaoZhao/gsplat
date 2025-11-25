@@ -119,6 +119,7 @@ std::tuple<
     torch::Tensor,
     torch::Tensor,
     torch::Tensor,
+    torch::Tensor,
     torch::Tensor>
 fully_fused_projection_bwd_tensor(
     // fwd inputs
@@ -277,6 +278,7 @@ fully_fused_projection_packed_fwd_tensor(
 );
 
 std::tuple<
+    torch::Tensor,
     torch::Tensor,
     torch::Tensor,
     torch::Tensor,

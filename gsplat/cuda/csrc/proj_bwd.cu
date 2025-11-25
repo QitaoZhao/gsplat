@@ -29,7 +29,8 @@ __global__ void proj_bwd_kernel(
     const T *__restrict__ v_means2d,  // [C, N, 2]
     const T *__restrict__ v_covars2d, // [C, N, 2, 2]
     T *__restrict__ v_means,          // [C, N, 3]
-    T *__restrict__ v_covars          // [C, N, 3, 3]
+    T *__restrict__ v_covars,         // [C, N, 3, 3]
+    T *__restrict__ v_Ks              // [C, 3, 3]
 ) {
 
     // For now we'll upcast float16 and bfloat16 to float32
@@ -49,12 +50,14 @@ __global__ void proj_bwd_kernel(
     v_means += idx * 3;
     v_covars += idx * 9;
     Ks += cid * 9;
+    v_Ks += cid * 9;
     v_means2d += idx * 2;
     v_covars2d += idx * 4;
 
     OpT fx = Ks[0], cx = Ks[2], fy = Ks[4], cy = Ks[5];
     mat3<OpT> v_covar(0.f);
     vec3<OpT> v_mean(0.f);
+    mat3<OpT> v_K(0.f);
     const vec3<OpT> mean = glm::make_vec3(means);
     const mat3<OpT> covar = glm::make_mat3(covars);
     const vec2<OpT> v_mean2d = glm::make_vec2(v_means2d);
@@ -74,7 +77,8 @@ __global__ void proj_bwd_kernel(
                 glm::transpose(v_covar2d),
                 v_mean2d,
                 v_mean,
-                v_covar
+                v_covar,
+                v_K
             );
             break;
         case CameraModelType::ORTHO: // orthographic projection
@@ -148,6 +152,7 @@ std::tuple<torch::Tensor, torch::Tensor> proj_bwd_tensor(
 
     torch::Tensor v_means = torch::empty({C, N, 3}, means.options());
     torch::Tensor v_covars = torch::empty({C, N, 3, 3}, means.options());
+    torch::Tensor v_Ks = torch::empty({C, 3, 3}, means.options());
 
     if (C && N) {
         at::cuda::CUDAStream stream = at::cuda::getCurrentCUDAStream();
@@ -173,7 +178,8 @@ std::tuple<torch::Tensor, torch::Tensor> proj_bwd_tensor(
                         v_means2d.data_ptr<scalar_t>(),
                         v_covars2d.data_ptr<scalar_t>(),
                         v_means.data_ptr<scalar_t>(),
-                        v_covars.data_ptr<scalar_t>()
+                        v_covars.data_ptr<scalar_t>(),
+                        v_Ks.data_ptr<scalar_t>()
                     );
             }
         );

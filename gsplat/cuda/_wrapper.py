@@ -829,7 +829,7 @@ class _FullyFusedProjection(torch.autograd.Function):
         camera_model_type = ctx.camera_model_type
         if v_compensations is not None:
             v_compensations = v_compensations.contiguous()
-        v_means, v_covars, v_quats, v_scales, v_viewmats = _make_lazy_cuda_func(
+        v_means, v_covars, v_quats, v_scales, v_viewmats, v_Ks = _make_lazy_cuda_func(
             "fully_fused_projection_bwd"
         )(
             means,
@@ -861,13 +861,15 @@ class _FullyFusedProjection(torch.autograd.Function):
             v_scales = None
         if not ctx.needs_input_grad[4]:
             v_viewmats = None
+        if not ctx.needs_input_grad[5]:
+            v_Ks = None
         return (
             v_means,
             v_covars,
             v_quats,
             v_scales,
             v_viewmats,
-            None,
+            v_Ks,
             None,
             None,
             None,
@@ -1114,7 +1116,7 @@ class _FullyFusedProjectionPacked(torch.autograd.Function):
 
         if v_compensations is not None:
             v_compensations = v_compensations.contiguous()
-        v_means, v_covars, v_quats, v_scales, v_viewmats = _make_lazy_cuda_func(
+        v_means, v_covars, v_quats, v_scales, v_viewmats, v_Ks = _make_lazy_cuda_func(
             "fully_fused_projection_packed_bwd"
         )(
             means,
@@ -1185,6 +1187,8 @@ class _FullyFusedProjectionPacked(torch.autograd.Function):
                 )
         if not ctx.needs_input_grad[4]:
             v_viewmats = None
+        if not ctx.needs_input_grad[5]:
+            v_Ks = None
 
         return (
             v_means,
@@ -1192,7 +1196,7 @@ class _FullyFusedProjectionPacked(torch.autograd.Function):
             v_quats,
             v_scales,
             v_viewmats,
-            None,
+            v_Ks,
             None,
             None,
             None,

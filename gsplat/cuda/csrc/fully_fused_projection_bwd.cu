@@ -41,11 +41,12 @@ __global__ void fully_fused_projection_bwd_kernel(
     const T *__restrict__ v_conics,        // [C, N, 3]
     const T *__restrict__ v_compensations, // [C, N] optional
     // grad inputs
-    T *__restrict__ v_means,   // [N, 3]
-    T *__restrict__ v_covars,  // [N, 6] optional
-    T *__restrict__ v_quats,   // [N, 4] optional
-    T *__restrict__ v_scales,  // [N, 3] optional
-    T *__restrict__ v_viewmats // [C, 4, 4] optional
+    T *__restrict__ v_means,    // [N, 3]
+    T *__restrict__ v_covars,   // [N, 6] optional
+    T *__restrict__ v_quats,    // [N, 4] optional
+    T *__restrict__ v_scales,   // [N, 3] optional
+    T *__restrict__ v_viewmats, // [C, 4, 4] optional
+    T *__restrict__ v_Ks        // [C, 3, 3] optional
 ) {
     // parallelize over C * N.
     uint32_t idx = cg::this_grid().thread_rank();
@@ -127,6 +128,7 @@ __global__ void fully_fused_projection_bwd_kernel(
     T fx = Ks[0], cx = Ks[2], fy = Ks[4], cy = Ks[5];
     mat3<T> v_covar_c(0.f);
     vec3<T> v_mean_c(0.f);
+    mat3<T> v_K(0.f);
 
     switch (camera_model) {
         case CameraModelType::PINHOLE: // perspective projection
@@ -142,7 +144,8 @@ __global__ void fully_fused_projection_bwd_kernel(
                 v_covar2d,
                 glm::make_vec2(v_means2d),
                 v_mean_c,
-                v_covar_c
+                v_covar_c,
+                v_K
             );
             break;
         case CameraModelType::ORTHO: // orthographic projection
@@ -256,9 +259,21 @@ __global__ void fully_fused_projection_bwd_kernel(
             }
         }
     }
+    if (v_Ks != nullptr) {
+        auto warp_group_c = cg::labeled_partition(warp, cid);
+        warpSum(v_K, warp_group_c);
+        if (warp_group_c.thread_rank() == 0) {
+            v_Ks += cid * 9;  // [C, 3, 3] flattened
+            gpuAtomicAdd(v_Ks + 0, v_K[0][0]);  // fx
+            gpuAtomicAdd(v_Ks + 2, v_K[2][0]);  // cx
+            gpuAtomicAdd(v_Ks + 4, v_K[1][1]);  // fy
+            gpuAtomicAdd(v_Ks + 5, v_K[2][1]);  // cy
+        }
+    }
 }
 
 std::tuple<
+    torch::Tensor,
     torch::Tensor,
     torch::Tensor,
     torch::Tensor,
@@ -327,6 +342,7 @@ fully_fused_projection_bwd_tensor(
     if (viewmats_requires_grad) {
         v_viewmats = torch::zeros_like(viewmats);
     }
+    torch::Tensor v_Ks = torch::zeros_like(Ks);
     if (C && N) {
         fully_fused_projection_bwd_kernel<float>
             <<<(C * N + GSPLAT_N_THREADS - 1) / GSPLAT_N_THREADS,
@@ -360,10 +376,11 @@ fully_fused_projection_bwd_tensor(
                 covars.has_value() ? v_covars.data_ptr<float>() : nullptr,
                 covars.has_value() ? nullptr : v_quats.data_ptr<float>(),
                 covars.has_value() ? nullptr : v_scales.data_ptr<float>(),
-                viewmats_requires_grad ? v_viewmats.data_ptr<float>() : nullptr
+                viewmats_requires_grad ? v_viewmats.data_ptr<float>() : nullptr,
+                v_Ks.data_ptr<float>()
             );
     }
-    return std::make_tuple(v_means, v_covars, v_quats, v_scales, v_viewmats);
+    return std::make_tuple(v_means, v_covars, v_quats, v_scales, v_viewmats, v_Ks);
 }
 
 } // namespace gsplat
